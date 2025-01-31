@@ -16,7 +16,7 @@ joinkey_lookup = {
     "BoxCollection":"RecKey",
     "Stack": "StackID",
     "TrapCollection": "RecKey",
-    "Pit":"SoilKey"
+    "Pits":"SoilKey"
 }
 
 def load_csv(file_path: str) -> pl.DataFrame:
@@ -35,6 +35,9 @@ def load_csv(file_path: str) -> pl.DataFrame:
 
 # soil
 # soilpits + soilhorizons on SoilKey
+
+def pksources_getter():
+    return pksources
 
 def create_primary_key(df: pl.DataFrame, key_fields: list) -> pl.DataFrame:
     # Concatenate the fields to create a PrimaryKey
@@ -111,8 +114,8 @@ def create_pksource_per_datatype(data_type):
     datatype_files = [i for i in os.listdir(DATA_DIR) if data_type in i or "lines" in i.lower() or 'plots' in i.lower()]
 
     # Detect available files for this data type
-    header_file = next((i for i in datatype_files if 'header' in i.lower()), None)
-    detail_file = next((i for i in datatype_files if 'detail' in i.lower()), None)
+    header_file = next((i for i in datatype_files if 'tblheader' in i.lower()), None)
+    detail_file = next((i for i in datatype_files if 'tbldetail' in i.lower()), None)
     lines_file = next((i for i in datatype_files if 'lines' in i.lower()), None)
     plots_file = next((i for i in datatype_files if 'plots' in i.lower()), None)
 
@@ -121,26 +124,18 @@ def create_pksource_per_datatype(data_type):
     stack_file = next((i for i in datatype_files if 'stack' in i.lower()), None)
     trapcollection_file = next((i for i in datatype_files if 'trapcollection' in i.lower()), None)
 
-    pit_file = next((i for i in datatype_files if 'header' in i.lower()), None)
-    pithorizons_file = next((i for i in datatype_files if 'header' in i.lower()), None)
+    pit_file = next((i for i in datatype_files if 'pits' in i.lower()), None)
+    pithorizons_file = next((i for i in datatype_files if 'pithorizon' in i.lower()), None)
+
+    ssd_file = next((i for i in datatype_files if 'soilstabdetail' in i.lower()), None)
+    ssh_file = next((i for i in datatype_files if 'soilstabheader' in i.lower()), None)
+
+
 
     if not header_file or not detail_file:
         logger.warning(f"Skipping {data_type}: Missing necessary Header or Detail files")
         return
 
-    # make if / case
-
-    header_path = os.path.normpath(os.path.join(DATA_DIR, header_file))
-    detail_path = os.path.normpath(os.path.join(DATA_DIR, detail_file))
-
-    header_df = pl.read_csv(header_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-    detail_df = pl.read_csv(detail_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-
-    # Join Header with Detail on RecKey
-    header_detail_df = header_df.join(detail_df, on="RecKey", how="inner")
-
-    #  add bsne tables and soil tables
-    # If available, join with Lines/Plots
     if lines_file and plots_file: # refine
         plots_path = os.path.normpath(os.path.join(DATA_DIR, plots_file))
         lines_path = os.path.normpath(os.path.join(DATA_DIR, lines_file))
@@ -151,11 +146,67 @@ def create_pksource_per_datatype(data_type):
         # Create the base Lines-Plots table
         lines_plots_df = lines_df.join(plots_df, on="PlotKey", how="inner")
 
+    # make if / case
+    if header_file and detail_file:
+        header_path = os.path.normpath(os.path.join(DATA_DIR, header_file))
+        detail_path = os.path.normpath(os.path.join(DATA_DIR, detail_file))
+
+        header_df = pl.read_csv(header_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+        detail_df = pl.read_csv(detail_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+
+        # Join Header with Detail on RecKey
+        semifinal_df = header_df.join(detail_df, on="RecKey", how="inner")
+
+    # handling dust deposition
+    elif stack_file and trapcollection_file:
+        stack_path = os.path.normpath(os.path.join(DATA_DIR, stack_file))
+        trapcollection_path = os.path.normpath(os.path.join(DATA_DIR, trapcollection_file))
+
+        stack_df = pl.read_csv(stack_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+        trapcollection_df = pl.read_csv(trapcollection_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+
+        semifinal_df = stack_df.join(trapcollection_df,on="StackID", how="inner")
+
+    # handling horizontal flux
+    elif stack_file and box_file and boxcollection_file:
+        stack_path = os.path.normpath(os.path.join(DATA_DIR, stack_file))
+        box_path = os.path.normpath(os.path.join(DATA_DIR, box_file))
+        boxcollection_path = os.path.normpath(os.path.join(DATA_DIR, boxcollection_file))
+
+        stack_df = pl.read_csv(stack_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+        box_df = pl.read_csv(box_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+        boxcollection_df = pl.read_csv(boxcollection_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+
+        semifinal_df = box_df.join(stack_df, on="StackID", how="inner")
+        semifinal_df = semifinal_df.join(boxcollection_df, on="BoxID", how="inner")
+
+    elif pit_file and pithorizons_file:
+        pit_path = os.path.normpath(os.path.join(DATA_DIR, pit_file))
+        pithorizons_path = os.path.normpath(os.path.join(DATA_DIR, pithorizons_file))
+
+        pit_df = pl.read_csv(pit_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+        pithorizons_df = pl.read_csv(pithorizons_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+
+        semifinal_df = pit_df.join(pithorizons_df, on="SoilKey", how="inner")
+
+    elif ssh_file and ssd_file:
+        ssd_path = os.path.normpath(os.path.join(DATA_DIR, ssd_file))
+        ssh_path = os.path.normpath(os.path.join(DATA_DIR, ssh_file))
+
+        ssd_df = pl.read_csv(ssd_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+        ssh_df = pl.read_csv(ssh_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+
+        semifinal_df = ssh_df.join(ssd_df, on="RecKey", how="inner")
+
+
+    # If available, join with Lines/Plots
+
+
         # Join header-detail with Lines-Plots using LineKey
-        final_source_df = header_detail_df.join(lines_plots_df, on="LineKey", how="inner", suffix="_right1")
-        final_source_df = final_source_df.select([i for i in final_source_df.columns if "right" not in i])
-    else:
-        final_source_df = header_detail_df
+    final_source_df = semifinal_df.join(lines_plots_df, on="LineKey", how="inner", suffix="_right1")
+    final_source_df = final_source_df.select([i for i in final_source_df.columns if "right" not in i])
+    # else:
+    #     final_source_df = header_detail_df
 
     # ensure only necessary columns are retained (keys and dates)
     key_columns = [col for col in final_source_df.columns if 'key' in col.lower() or 'date' in col.lower()]
