@@ -76,17 +76,26 @@ for mdb_file in /dimas/*.mdb; do
     # Loop over each table in the list
     for table in "${tables[@]}"; do
         cleaned_table_name=$(echo "$table" | tr -d '_') # Remove spaces in tablenames
-        # Construct the output CSV filename
-        csv_filename="${output_dir}/${base_filename}_${cleaned_table_name}.csv"
 
-        # Use mdb-export to extract the table into the CSV file
-        mdb-export "$mdb_file" "$table" > "$csv_filename"
+        # Check the number of rows in the table (excluding headers)
+        row_count=$(mdb-export "$mdb_file" "$table" | wc -l)
 
-        # Check if the extraction was successful
-        if [ $? -eq 0 ]; then
-            echo "Extracted $table from $mdb_file to $csv_filename"
+        # Ensure at least one data row exists (header row doesn't count)
+        if [ "$row_count" -gt 1 ]; then
+            # Construct the output CSV filename
+            csv_filename="${output_dir}/${base_filename}_${cleaned_table_name}.csv"
+
+            # Export the table to the CSV file
+            mdb-export "$mdb_file" "$table" > "$csv_filename"
+
+            # Check if the extraction was successful
+            if [ $? -eq 0 ]; then
+                echo "Extracted $table from $mdb_file to $csv_filename"
+            else
+                echo "Failed to extract $table from $mdb_file"
+            fi
         else
-            echo "Failed to extract $table from $mdb_file"
+            echo "Skipping $table from $mdb_file as it has no data rows."
         fi
     done
 done

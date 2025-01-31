@@ -8,7 +8,7 @@ load_dotenv()
 # postgres schema to ingest into
 SCHEMA = "dima_prod"
 
-# Dockerfile for the platform agnostic extractor 
+# Dockerfile for the platform agnostic extractor
 DOCKERFILE_DIR = "./_1_dima_extract"
 
 # DB credentials, modify .env file
