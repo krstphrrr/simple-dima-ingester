@@ -1,7 +1,7 @@
 
 from _2_dima_loadingest.scripts.data_cleaner import add_date_loaded_column, deduplicate_dataframe
 from _2_dima_loadingest.scripts.db_connector import insert_dataframe_to_db
-# from _2_dima_loadingest.scripts.data_loader import temp_storage
+from _2_dima_loadingest.config import fulljoin_key
 
 import polars as pl
 import logging
@@ -11,6 +11,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 temp_storage = {}
+pksources = {}
 
 """
 helper functions for data_loader: process_csv
