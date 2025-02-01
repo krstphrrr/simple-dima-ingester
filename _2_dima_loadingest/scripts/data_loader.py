@@ -9,35 +9,93 @@ logger = logging.getLogger(__name__)
 
 temp_storage = {} # ingestables
 pksources = {}
-joinkey_lookup = {
-    "Detail":"RecKey",
-    "Header":"LineKey",
-    "Box" : "BoxID",
-    "BoxCollection":"RecKey",
-    "Stack": "StackID",
-    "TrapCollection": "RecKey",
-    "Pits":"SoilKey"
+
+
+# Which column to join to provide primarykey back to table
+fulljoin_key = {
+    "tblCompact":{
+        "Header": "PlotKey",
+        "Detail": "RecKey",
+    },
+    "tblGap": {
+        "Header": "LineKey",
+        "Detail": "RecKey",
+    },
+    "tblLPI": {
+        "Header": "LineKey",
+        "Detail": "RecKey"
+    },
+    "tblPlantDen": {
+        "Header": "LineKey",
+        "Detail": "RecKey",
+        "Quads": "RecKey",
+        "Species": "RecKey",
+    },
+    "tblSoilStab": {
+        "Header": "LineKey",
+        "Detail": "RecKey",
+    },
+    "tblSpecRich":{
+        "Header": "LineKey",
+        "Detail": "RecKey",
+    },
+    "tblSoil": {
+        "Pits": "SoilKey",
+        "PitHorizons": "SoilKey",
+    },
+    "tblBSNE": {
+        "Box": "BoxID",
+        "BoxCollection": "RecKey",
+        "Stack": "StackID",
+        "TrapCollection": "RecKey",
+    },
+    "Base":{
+        "Lines": "LineKey",
+        "Plots": "PlotKey",
+    },
+}
+# which column to join to lineplot
+lineplotjoin_key = {
+    "tblCompact": "PlotKey",
+    "tblGap": "LineKey",
+    "tblLPI": "LineKey",
+    "tblPlantDen": "LineKey",
+    "tblSoil": "PlotKey",
+    "tblSoilStab": "PlotKey",
+    "tblSpecRich": "LineKey",
+    "Base": "LineKey",
+}
+# date source for pk formation depending on data type
+pkdate_source = {
+    "tblCompact": "FormDate",
+    "tblGap": "FormDate",
+    "tblLPI": "FormDate",
+    "tblPlantDen": "FormDate",
+    "tblSoil" : "DateRecorded",
+    "tblSoilStab": "FormDate",
+    "tblSpecRich": "FormDate",
+    "tblBSNE" : "collectDate",
+    "Base": "FormDate",
 }
 
 def load_csv(file_path: str) -> pl.DataFrame:
+    "to be removed"
     try:
         df = pl.read_csv(file_path)
         return df
     except Exception as e:
         logger.error(f"Error loading CSV: {e}")
         return None
-# dust deposition only  if trapcollection.shape>0 or is present
-# stack and trapcollection on stackID
 
-# horizontalflux
-# box + stack on StackID
-# boxstack + boxcollection on BoxID
 
-# soil
-# soilpits + soilhorizons on SoilKey
 
 def pksources_getter():
+    "dictionary getter for debug"
     return pksources
+
+def temp_storage_getter():
+    "dictionary getter for debug"
+    return temp_storage
 
 def create_primary_key(df: pl.DataFrame, key_fields: list) -> pl.DataFrame:
     # Concatenate the fields to create a PrimaryKey
@@ -45,14 +103,21 @@ def create_primary_key(df: pl.DataFrame, key_fields: list) -> pl.DataFrame:
 
 
 def process_csv(file_name: str, project_key: str = None):
+    """
+    1. Classifies csv file name on: source, data_type, table_type
+    2. Creates a PrimaryKey source per data_type
+    3. Appends PrimaryKey back to processed csv
+
+    """
     logger.info(f"Starting process_csv function for file: {file_name}")
-    source, table_type, data_type = classify_table(file_name)
+    source, data_type, table_type = classify_table(file_name)
     if not source or not table_type or not data_type:
         return  # Skip invalid files
 
 
     # Ensure the pksource is created before processing the file
     if data_type not in pksources:
+        logger.info(f"for table: {table_type}")
         create_pksource_per_datatype(data_type)
 
     # Load the CSV into a DataFrame
@@ -83,10 +148,15 @@ def process_csv(file_name: str, project_key: str = None):
 
 
 def perform_ordered_joins(data_type):
+
     """Handles ordered joins and ensures every table gets a PrimaryKey."""
     if data_type not in pksources:
         logger.error(f"PrimaryKey source not found for {data_type}. Skipping joins.")
         return
+    if data_type == 'NoPrimaryKey':
+        logger.error(f"Found '{data_type}' data type. Skipping joins.")
+        return
+
 
     pk_source = pksources[data_type]  # Get the pre-joined primary key source
 
@@ -94,7 +164,7 @@ def perform_ordered_joins(data_type):
     for table_type in temp_storage[data_type]:
         if "PrimaryKey" not in temp_storage[data_type][table_type].columns:
             temp_storage[data_type][table_type] = temp_storage[data_type][table_type].join(
-                pk_source, on="LineKey", how="left"
+                pk_source, on=fulljoin_key[data_type][table_type], how="left"
             )
 
     # Final PrimaryKey validation
@@ -107,15 +177,32 @@ def validate_primary_keys(data_type):
             logger.warning(f"Table {data_type}_{table_type} is missing PrimaryKey!")
 
 
+
 def create_pksource_per_datatype(data_type):
-    """Creates a primary key source DataFrame for a given data type by joining Header, Detail, and Lines/Plots."""
+    """
+    Creates a primary key source DataFrame for a given data type by joining Header, Detail, and Lines/Plots.
+
+    dup code smell: refactor
+    """
     logger.info(f"Creating primary key source for data type: {data_type}")
+    if data_type == "NoPrimaryKey":
+        logger.info(f"returning..")
+        return
 
     datatype_files = [i for i in os.listdir(DATA_DIR) if data_type in i or "lines" in i.lower() or 'plots' in i.lower()]
+    if data_type == 'tblSoil':
+        datatype_files = [i for i in datatype_files if 'stab' not in i.lower()]
+
 
     # Detect available files for this data type
-    header_file = next((i for i in datatype_files if 'tblheader' in i.lower()), None)
-    detail_file = next((i for i in datatype_files if 'tbldetail' in i.lower()), None)
+    header_file = next((i for i in datatype_files if 'header' in i.lower()), None)
+    detail_file = next((i for i in datatype_files if 'detail' in i.lower()), None)
+
+    if data_type == 'Base':
+        datatype_files_base = [i for i in os.listdir(DATA_DIR) if "tblGap" in i or "lines" in i.lower() or 'plots' in i.lower()]
+        header_file = next((i for i in datatype_files_base if 'header' in i.lower()), None)
+        detail_file = next((i for i in datatype_files_base if 'detail' in i.lower()), None)
+
     lines_file = next((i for i in datatype_files if 'lines' in i.lower()), None)
     plots_file = next((i for i in datatype_files if 'plots' in i.lower()), None)
 
@@ -127,100 +214,99 @@ def create_pksource_per_datatype(data_type):
     pit_file = next((i for i in datatype_files if 'pits' in i.lower()), None)
     pithorizons_file = next((i for i in datatype_files if 'pithorizon' in i.lower()), None)
 
-    ssd_file = next((i for i in datatype_files if 'soilstabdetail' in i.lower()), None)
-    ssh_file = next((i for i in datatype_files if 'soilstabheader' in i.lower()), None)
+    try:
+        if lines_file and plots_file: # refine
+            logger.info(f"GOT LINEPLOT")
 
+            plots_path = os.path.normpath(os.path.join(DATA_DIR, plots_file))
+            lines_path = os.path.normpath(os.path.join(DATA_DIR, lines_file))
 
+            lines_df = pl.read_csv(lines_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            plots_df = pl.read_csv(plots_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
 
-    if not header_file or not detail_file:
-        logger.warning(f"Skipping {data_type}: Missing necessary Header or Detail files")
-        return
+            # Create the base Lines-Plots table
+            lines_plots_df = lines_df.join(plots_df, on="PlotKey", how="inner")
 
-    if lines_file and plots_file: # refine
-        plots_path = os.path.normpath(os.path.join(DATA_DIR, plots_file))
-        lines_path = os.path.normpath(os.path.join(DATA_DIR, lines_file))
+        # make if / case
+        if 'Base' in data_type:
+            logger.info(f"BASE IN")
+            header_path = os.path.normpath(os.path.join(DATA_DIR, header_file))
+            detail_path = os.path.normpath(os.path.join(DATA_DIR, detail_file))
 
-        lines_df = pl.read_csv(lines_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-        plots_df = pl.read_csv(plots_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            header_df = pl.read_csv(header_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            detail_df = pl.read_csv(detail_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
 
-        # Create the base Lines-Plots table
-        lines_plots_df = lines_df.join(plots_df, on="PlotKey", how="inner")
+            # Join Header with Detail on RecKey
+            semifinal_df = header_df.join(detail_df, on="RecKey", how="inner")
 
-    # make if / case
-    if header_file and detail_file:
-        header_path = os.path.normpath(os.path.join(DATA_DIR, header_file))
-        detail_path = os.path.normpath(os.path.join(DATA_DIR, detail_file))
+        logger.info(f"{header_file} and {detail_file}")
+        if header_file and detail_file:
+            logger.info(f"NO BASE BUT HEADER DETAIL")
+            header_path = os.path.normpath(os.path.join(DATA_DIR, header_file))
+            detail_path = os.path.normpath(os.path.join(DATA_DIR, detail_file))
 
-        header_df = pl.read_csv(header_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-        detail_df = pl.read_csv(detail_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            header_df = pl.read_csv(header_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            detail_df = pl.read_csv(detail_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
 
-        # Join Header with Detail on RecKey
-        semifinal_df = header_df.join(detail_df, on="RecKey", how="inner")
+            # Join Header with Detail on RecKey
+            semifinal_df = header_df.join(detail_df, on="RecKey", how="inner")
 
-    # handling dust deposition
-    elif stack_file and trapcollection_file:
-        stack_path = os.path.normpath(os.path.join(DATA_DIR, stack_file))
-        trapcollection_path = os.path.normpath(os.path.join(DATA_DIR, trapcollection_file))
+        # handling dust deposition
+        elif stack_file and trapcollection_file:
+            print(3)
+            stack_path = os.path.normpath(os.path.join(DATA_DIR, stack_file))
+            trapcollection_path = os.path.normpath(os.path.join(DATA_DIR, trapcollection_file))
 
-        stack_df = pl.read_csv(stack_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-        trapcollection_df = pl.read_csv(trapcollection_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            stack_df = pl.read_csv(stack_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            trapcollection_df = pl.read_csv(trapcollection_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
 
-        semifinal_df = stack_df.join(trapcollection_df,on="StackID", how="inner")
+            semifinal_df = stack_df.join(trapcollection_df,on="StackID", how="inner")
 
-    # handling horizontal flux
-    elif stack_file and box_file and boxcollection_file:
-        stack_path = os.path.normpath(os.path.join(DATA_DIR, stack_file))
-        box_path = os.path.normpath(os.path.join(DATA_DIR, box_file))
-        boxcollection_path = os.path.normpath(os.path.join(DATA_DIR, boxcollection_file))
+        # handling horizontal flux
+        elif stack_file and box_file and boxcollection_file:
+            stack_path = os.path.normpath(os.path.join(DATA_DIR, stack_file))
+            box_path = os.path.normpath(os.path.join(DATA_DIR, box_file))
+            boxcollection_path = os.path.normpath(os.path.join(DATA_DIR, boxcollection_file))
 
-        stack_df = pl.read_csv(stack_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-        box_df = pl.read_csv(box_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-        boxcollection_df = pl.read_csv(boxcollection_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            stack_df = pl.read_csv(stack_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            box_df = pl.read_csv(box_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            boxcollection_df = pl.read_csv(boxcollection_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
 
-        semifinal_df = box_df.join(stack_df, on="StackID", how="inner")
-        semifinal_df = semifinal_df.join(boxcollection_df, on="BoxID", how="inner")
+            semifinal_df = box_df.join(stack_df, on="StackID", how="inner")
+            semifinal_df = semifinal_df.join(boxcollection_df, on="BoxID", how="inner")
 
-    elif pit_file and pithorizons_file:
-        pit_path = os.path.normpath(os.path.join(DATA_DIR, pit_file))
-        pithorizons_path = os.path.normpath(os.path.join(DATA_DIR, pithorizons_file))
+        elif pit_file and pithorizons_file:
+            pit_path = os.path.normpath(os.path.join(DATA_DIR, pit_file))
+            pithorizons_path = os.path.normpath(os.path.join(DATA_DIR, pithorizons_file))
 
-        pit_df = pl.read_csv(pit_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-        pithorizons_df = pl.read_csv(pithorizons_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            pit_df = pl.read_csv(pit_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
+            pithorizons_df = pl.read_csv(pithorizons_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
 
-        semifinal_df = pit_df.join(pithorizons_df, on="SoilKey", how="inner")
+            semifinal_df = pit_df.join(pithorizons_df, on="SoilKey", how="inner")
+    except e:
+        logger.info(f"error: {e}")
 
-    elif ssh_file and ssd_file:
-        ssd_path = os.path.normpath(os.path.join(DATA_DIR, ssd_file))
-        ssh_path = os.path.normpath(os.path.join(DATA_DIR, ssh_file))
-
-        ssd_df = pl.read_csv(ssd_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-        ssh_df = pl.read_csv(ssh_path, null_values=["NA", "N/A", "null"], infer_schema_length=10000000)
-
-        semifinal_df = ssh_df.join(ssd_df, on="RecKey", how="inner")
-
-
-    # If available, join with Lines/Plots
-
-
+    finally:
         # Join header-detail with Lines-Plots using LineKey
-    final_source_df = semifinal_df.join(lines_plots_df, on="LineKey", how="inner", suffix="_right1")
-    final_source_df = final_source_df.select([i for i in final_source_df.columns if "right" not in i])
-    # else:
-    #     final_source_df = header_detail_df
+        final_source_df = semifinal_df.join(lines_plots_df, on=lineplotjoin_key[data_type], how="inner", suffix="_right1")
+        final_source_df = final_source_df.select([i for i in final_source_df.columns if "right" not in i])
+        # else:
+        #     final_source_df = header_detail_df
 
-    # ensure only necessary columns are retained (keys and dates)
-    key_columns = [col for col in final_source_df.columns if 'key' in col.lower() or 'date' in col.lower()]
-    final_source_df = final_source_df.select(key_columns)
-    date_columns = [i for i in final_source_df.columns if "date" in i.lower()]
-    final_source_df = final_source_df.with_columns([
-        final_source_df[col].str.strptime(pl.Date, "%m/%d/%y %H:%M:%S").dt.strftime("%Y-%m-%d").alias(col)
-        for col in date_columns
-    ])
-    final_source_df = create_primary_key(final_source_df, ["PlotKey", "FormDate"])
+        # ensure only necessary columns are retained (keys and dates)
+        key_columns = [col for col in final_source_df.columns if 'key' in col.lower() or 'date' in col.lower()]
+        final_source_df = final_source_df.select(key_columns)
+        date_columns = [i for i in final_source_df.columns if "date" in i.lower()]
+        final_source_df = final_source_df.with_columns([
+            final_source_df[col].str.strptime(pl.Date, "%m/%d/%y %H:%M:%S").dt.strftime("%Y-%m-%d").alias(col)
+            for col in date_columns
+        ])
+        final_source_df = create_primary_key(final_source_df, ["PlotKey", pkdate_source[data_type]])
 
-    # Store in pksources dictionary
-    pksources[data_type] = final_source_df
-    logger.info(f"Stored primary key source for {data_type}")
+        # Store in pksources dictionary
+        pksources[data_type] = final_source_df
+        logger.info(f"Stored primary key source for {data_type}")
+
 
 
 def classify_table(file_name: str):
@@ -244,24 +330,39 @@ def classify_table(file_name: str):
         "Stack": "Stack",
         "TrapCollection": "TrapCollection",
         "Pits": "Pits",
-        "PitHorizons": "PitHorizons"
+        "PitHorizons": "PitHorizons",
+        "Quads": "Quads",
+        "Species": "Species",
+        # "SpeciesGeneric": "SpeciesGeneric"
         # "Lines": "Lines",
         # "Plots": "Plots"
     }
 
     for suffix, ttype in table_mappings.items():
-        if target_table.endswith(suffix):
+        if target_table.endswith(suffix) and "tblSpecies" not in target_table:
             table_type = ttype
             target_table = target_table[: -len(suffix)]
             break
-    if "tblLines" in target_table:
+    if target_table == "tblLines":
         return source, "Base", "Lines"
     elif target_table == "tblPlots":
         return source, "Base", "Plots"
+    elif target_table == "tblPlotNotes":
+        return source, "NoPrimaryKey", "PlotNotes"
+    elif target_table == "tblPlotHistory":
+        return source, "NoPrimaryKey", "PlotHistory"
+    elif target_table == "tblSites":
+        return source, "NoPrimaryKey", "Sites"
+    elif target_table == "tblSpecies":
+        return source, "NoPrimaryKey", "Species"
+    elif target_table == "tblSpeciesGeneric":
+        return source, "NoPrimaryKey", "SpeciesGeneric"
+    elif target_table == "tblESDRockFragments":
+        return source, "NoPrimaryKey", "tblESDRockFragments"
 
     if not table_type:
         logger.error(f"Unexpected table type in filename {file_name}")
         return None, None, None
 
     data_type = target_table  # The remaining table name represents data type
-    return source, table_type, data_type
+    return source, data_type, table_type
