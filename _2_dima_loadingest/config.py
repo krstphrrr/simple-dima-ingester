@@ -60,3 +60,75 @@ LOGGING_CONFIG = {
 }
 
 logging.config.dictConfig(LOGGING_CONFIG)
+
+
+"""
+data_loader: joinkey and date field config
+"""
+
+# Which column to join to provide primarykey back to table
+fulljoin_key = {
+    "tblCompact":{
+        "Header": "PlotKey",
+        "Detail": "RecKey",
+    },
+    "tblGap": {
+        "Header": "LineKey",
+        "Detail": "RecKey",
+    },
+    "tblLPI": {
+        "Header": "LineKey",
+        "Detail": "RecKey"
+    },
+    "tblPlantDen": {
+        "Header": "LineKey",
+        "Detail": "RecKey",
+        "Quads": "RecKey",
+        "Species": "RecKey",
+    },
+    "tblSoilStab": {
+        "Header": "LineKey",
+        "Detail": "RecKey",
+    },
+    "tblSpecRich":{
+        "Header": "LineKey",
+        "Detail": "RecKey",
+    },
+    "tblSoil": {
+        "Pits": "SoilKey",
+        "PitHorizons": "SoilKey",
+    },
+    "tblBSNE": {
+        "Box": "BoxID",
+        "BoxCollection": "RecKey",
+        "Stack": "StackID",
+        "TrapCollection": "RecKey",
+    },
+    "Base":{
+        "Lines": "LineKey",
+        "Plots": "PlotKey",
+    },
+}
+# which column to join to lineplot
+lineplotjoin_key = {
+    "tblCompact": "PlotKey",
+    "tblGap": "LineKey",
+    "tblLPI": "LineKey",
+    "tblPlantDen": "LineKey",
+    "tblSoil": "PlotKey",
+    "tblSoilStab": "PlotKey",
+    "tblSpecRich": "LineKey",
+    "Base": "LineKey",
+}
+# date source for pk formation depending on data type
+pkdate_source = {
+    "tblCompact": "FormDate",
+    "tblGap": "FormDate",
+    "tblLPI": "FormDate",
+    "tblPlantDen": "FormDate",
+    "tblSoil" : "DateRecorded",
+    "tblSoilStab": "FormDate",
+    "tblSpecRich": "FormDate",
+    "tblBSNE" : "collectDate",
+    "Base": "FormDate",
+}

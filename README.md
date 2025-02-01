@@ -33,7 +33,6 @@ This CLI app provides tools for extracting and processing data from Microsoft Ac
   - [_1_dima_extract](#1_dima_extract)
   - [_2_dima_loadingest](#2_dima_loadingest)
 - [Configuration](#configuration)
-- [Contributing](#contributing)
 - [License](#license)
 
 ## Installation
@@ -54,7 +53,3 @@ cd dima-cli
 pip install -r requirements.txt
 ```
 ## Usage
-
-
-
-
